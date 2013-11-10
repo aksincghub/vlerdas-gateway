@@ -1,0 +1,93 @@
+{
+    "server" : {
+        "port" : 80,
+        "host" : "localhost"
+    },
+    "secureServer" : {
+        "port" : 443,
+        "host" : "127.0.0.1",
+        "options" : {
+            "https" : {
+                "key" : "config/das.dynalias.org_privatekey.pem",
+                "cert" : "config/das.dynalias.org_cert.pem",
+                "requestCert" : true,
+                "rejectUnauthorized" : true,
+                "agent" : false,
+                "ca" : ["config/das.dynalias.org_cert.pem"],
+                "passphrase" : "test123"
+            }
+        }
+    },
+    "accessControl.DISABLED" : {
+        "testuser1" : {
+            "accessKeyId" : "testuser1",
+            "accessKeySecret" : "pa$$w0rd1",
+            "allowMethods" : "*"
+        },
+        "testuser2" : {
+            "accessKeyId" : "testuser2",
+            "accessKeySecret" : "pa$$w0rd2",
+            "allowMethods" : "POST"
+        }
+    },
+    "ofuda" : {
+        "headerPrefix" : "Amz",
+        "hash" : "sha1",
+        "serviceLabel" : "AWS",
+        "debug" : false
+    },
+    "routes" : [{
+            "path" : "/lens/v1",
+            "host" : "localhost",
+            "port" : "4001",
+            "xforward" : true,
+            "changeOrgin" : false,
+            "timeout" : 12000
+        }, {
+            "path" : "/ecrud/v1/audit",
+            "host" : "localhost",
+            "port" : "3002",
+            "xforward" : true,
+            "changeOrgin" : false,
+            "timeout" : 12000
+        }, {
+            "path" : "/ecrud/v1/core",
+            "host" : "localhost",
+            "port" : "3001",
+            "xforward" : true,
+            "changeOrgin" : false,
+            "timeout" : 12000
+        }, {
+            "path" : "/pix/v1",
+            "host" : "localhost",
+            "port" : "5001",
+            "xforward" : true,
+            "changeOrgin" : false,
+            "timeout" : 12000
+        }
+    ],
+    "audit" : {
+        "structured" : {
+            "options" : {
+                "hostname" : "localhost",
+                "port" : 3003,
+                "path" : "/ecrud/v1/audit/gateway",
+                "method" : "POST",
+                "headers" : {
+                    "Content-Type" : "application/json"
+                }
+            }
+        },
+        "unstructured" : {
+            "options" : {
+                "hostname" : "localhost",
+                "port" : 3003,
+                "path" : "/ecrud/v1/audit/fs",
+                "method" : "POST"
+            },
+			"auditRequest":true,
+			"auditResponse":true
+        }
+    },
+    "debug" : true
+}

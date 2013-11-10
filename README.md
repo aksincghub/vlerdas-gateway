@@ -1,4 +1,4 @@
-vlerdas-gateway
+VLER Gateway
 ===============
 
-IHE XCA SOAP Implementation
+RESTFul Proxy - Gateway to VLER Applications
