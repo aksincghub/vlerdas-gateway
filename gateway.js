@@ -524,6 +524,7 @@ function audit(req, res, err, callback) {
 // Default exception handler
 process.on('uncaughtException', function (err) {
     console.error('Caught exception: ' + err);
+    process.exit()
 });
 // Ctrl-C Shutdown
 process.on('SIGINT', function () {
@@ -532,5 +533,8 @@ process.on('SIGINT', function () {
 })
 // Default exception handler
 process.on('exit', function (err) {
-    console.log('Exiting.. Error:', err);
+	if(err)
+		console.log('Exiting.. Error:', err);
+	else 
+		console.log('Exiting..');
 });
