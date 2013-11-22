@@ -422,16 +422,20 @@ function configureOptions(configOptions) {
         options.https.pfx = fs.readFileSync(configOptions.https.pfx);
     }
 
-    options.https.requestCert = true;
+    options.https.requestCert = configOptions.https.requestCert;
     options.https.rejectUnauthorized = configOptions.https.rejectUnauthorized;
     options.https.agent = configOptions.https.agent;
-    options.https.ca = [];
-    for (var i = 0; i < configOptions.https.ca.length; i++) {
-        if (config.debug) {
-            console.log("Loading file:", configOptions.https.ca[i]);
+    
+    if (!_.isUndefined(configOptions.https.ca) && Array.isArray(configOptions.https.ca)) {
+        options.https.ca = [];
+        for (var i = 0; i < configOptions.https.ca.length; i++) {
+            if (config.debug) {
+                console.log("Loading file:", configOptions.https.ca[i]);
+            }
+            options.https.ca[i] = fs.readFileSync(configOptions.https.ca[i]);
         }
-        options.https.ca[i] = fs.readFileSync(configOptions.https.ca[i]);
     }
+    
     options.https.passphrase = configOptions.https.passphrase;
     return options;
 }
