@@ -223,7 +223,7 @@ var handler = function (req, res) {
                             if (config.debug) {
                                 console.log("Initializing Audit: ");
                             }
-                            requestAttachmentAudit = initializeAudit(key, route.unstructured.auditRequest.options);
+                            requestAttachmentAudit = initializeAudit(key, route.audit.unstructured.options);
                             var beforeAttachmentText = getBeforeAttachment(key, key + '.' + ext, type);
                             if (config.debug) {
                                 console.log("Writing Before Attachment Text: ", beforeAttachmentText);
@@ -353,7 +353,7 @@ function getAttachmentHeader(key) {
 
 function getAttachmentAuditOptions(key, auditOptions) {
     var header = getAttachmentHeader(key);
-    var options = auditOptions;
+    var options = auditOptions ? auditOptions : {};
     options.headers = header;
     if (config.debug) {
         console.log('Getting Attachment Audit options: ', options);
