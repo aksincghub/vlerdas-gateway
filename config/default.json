@@ -36,58 +36,114 @@
         "serviceLabel" : "AWS",
         "debug" : false
     },
-    "routes" : [{
+    "routes" :
+    [{
             "path" : "/lens/v1",
-            "host" : "localhost",
-            "port" : "4001",
-            "xforward" : true,
-            "changeOrgin" : false,
-            "timeout" : 12000
-        }, {
-            "path" : "/ecrud/v1/audit",
-            "host" : "localhost",
-            "port" : "3002",
-            "xforward" : true,
-            "changeOrgin" : false,
-            "timeout" : 12000
+            "options" :
+            [{
+                    "host" : "localhost",
+                    "port" : "4001",
+                    "xforward" : true,
+                    "changeOrgin" : false,
+                    "timeout" : 12000,
+                    "audit" : {
+                        "structured" : {
+                            "options" : {
+                                "hostname" : "localhost",
+                                "port" : 3003,
+                                "path" : "/ecrud/v1/audit/gateway",
+                                "method" : "POST",
+                                "headers" : {
+                                    "Content-Type" : "application/json"
+                                }
+                            },
+                            "auditRequest" : true,
+                            "auditResponse" : true
+                        },
+                        "unstructured" : {
+                            "options" : {
+                                "hostname" : "localhost",
+                                "port" : 3003,
+                                "path" : "/ecrud/v1/audit/fs",
+                                "method" : "POST"
+                            },
+                            "auditRequest" : true,
+                            "auditResponse" : true
+                        }
+                    }
+                }
+            ]
         }, {
             "path" : "/ecrud/v1/core",
-            "host" : "localhost",
-            "port" : "3001",
-            "xforward" : true,
-            "changeOrgin" : false,
-            "timeout" : 12000
+            "options" : [{
+                    "host" : "localhost",
+                    "port" : "3001",
+                    "xforward" : true,
+                    "changeOrgin" : false,
+                    "timeout" : 12000,
+                    "audit" : {
+                        "structured" : {
+                            "options" : {
+                                "hostname" : "localhost",
+                                "port" : 3003,
+                                "path" : "/ecrud/v1/audit/gateway",
+                                "method" : "POST",
+                                "headers" : {
+                                    "Content-Type" : "application/json"
+                                }
+                            },
+                            "auditRequest" : true,
+                            "auditResponse" : true
+                        },
+                        "unstructured" : {
+                            "options" : {
+                                "hostname" : "localhost",
+                                "port" : 3003,
+                                "path" : "/ecrud/v1/audit/fs",
+                                "method" : "POST"
+                            },
+                            "auditRequest" : true,
+                            "auditResponse" : true
+                        }
+                    }
+                }
+            ]
         }, {
             "path" : "/pix/v1",
-            "host" : "localhost",
-            "port" : "5001",
-            "xforward" : true,
-            "changeOrgin" : false,
-            "timeout" : 12000
+            "options" : [{
+                    "host" : "localhost",
+                    "port" : "5001",
+                    "xforward" : true,
+                    "changeOrgin" : false,
+                    "timeout" : 12000,
+                    "audit" : {
+                        "structured" : {
+                            "options" : {
+                                "hostname" : "localhost",
+                                "port" : 3003,
+                                "path" : "/ecrud/v1/audit/gateway",
+                                "method" : "POST",
+                                "headers" : {
+                                    "Content-Type" : "application/json"
+                                }
+                            },
+                            "auditRequest" : true,
+                            "auditResponse" : true
+                        },
+                        "unstructured" : {
+                            "options" : {
+                                "hostname" : "localhost",
+                                "port" : 3003,
+                                "path" : "/ecrud/v1/audit/fs",
+                                "method" : "POST"
+                            },
+                            "auditRequest" : true,
+                            "auditResponse" : true
+                        }
+                    }
+                }
+            ]
         }
     ],
-    "audit" : {
-        "structured" : {
-            "options" : {
-                "hostname" : "localhost",
-                "port" : 3003,
-                "path" : "/ecrud/v1/audit/gateway",
-                "method" : "POST",
-                "headers" : {
-                    "Content-Type" : "application/json"
-                }
-            }
-        },
-        "unstructured" : {
-            "options" : {
-                "hostname" : "localhost",
-                "port" : 3003,
-                "path" : "/ecrud/v1/audit/fs",
-                "method" : "POST"
-            },
-			"auditRequest":true,
-			"auditResponse":true
-        }
-    },
     "debug" : true
 }

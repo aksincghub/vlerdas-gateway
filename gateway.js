@@ -72,144 +72,134 @@ var handler = function (req, res) {
     if (config.debug) {
         console.log("Parsed URL", req.parsedUrl);
     }
-    if (req.parsedUrl.query && req.parsedUrl.query.redirectURL) {
-        if (config.debug) {
-            console.log("Checking if there is a redirect URL", req.parsedUrl.query.redirectURL);
-        }
-        if (req.parsedUrl.query.redirectURL) {
-            if (config.debug) {
-                console.log("Parsing Redirect URL", req.parsedUrl.query.redirectURL);
-            }
-            var redirect = url.parse(req.parsedUrl.query.redirectURL);
-            if (config.debug) {
-                console.log("Parsed Redirect URL", redirect);
-            }
-            if (config.debug) {
-                console.log("Redirecting to ", redirect.href);
-            }
-            // Only HTTP is supported
-            request.get(req.parsedUrl.query.redirectURL).pipe(res);
-            if (config.debug) {
-                console.log("Auditing Request and Response", req, res);
-            }
-            audit(req, res, '', function (auditRes) {});
-            return;
-
-        } else {
-            if (config.debug) {
-                console.log("Problem with parsing Redirect URL", url);
-            }
-        }
-    } else if (!_.isUndefined(req.parsedUrl.pathname) && !(S(req.parsedUrl.path).contains('ping') || S(req.parsedUrl.path).contains('PING'))) {
+    if (!_.isUndefined(req.parsedUrl.pathname) && !(S(req.parsedUrl.path).contains('ping') || S(req.parsedUrl.path).contains('PING'))) {
         if (config.debug) {
             console.log("Routing..");
         }
         for (var i = 0; i < config.routes.length; i++) {
-            var route = config.routes[i];
             if (!_.isUndefined(req.parsedUrl.pathname)) {
                 if (S(req.parsedUrl.pathname).contains(config.routes[i].path)) {
                     if (config.debug) {
                         console.log("Routing Path contains " + config.routes[i].path);
-                        console.log("Routing to " + config.routes[i].host, config.routes[i].port, req.parsedUrl.pathname);
+                        console.log("Routing to " + config.routes[i].options, req.parsedUrl.pathname);
                     }
+                    if (_.isUndefined(config.routes[i].options)) {
+                        throw new Error("Route options has to be defined");
+                    }
+					// Random Routing
+                    var len = Math.floor(Math.random() * config.routes[i].options.length);
+                    var route = config.routes[i].options.length > 0 ? config.routes[i].options[len] : config.routes[i].options[0];
 
                     var options = {
-                        hostname : config.routes[i].host,
-                        port : config.routes[i].port,
+                        hostname : route.host,
+                        port : route.port,
                         path : req.parsedUrl.path,
                         method : req.method,
-                        headers : req.headers
-                    };
+                        headers : req.headers,
+                    }
+                    var proxy_client;
+                    if (!_.isUndefined(route.https)) {
+                        options.rejectUnauthorized = route.https.rejectUnauthorized;
+                        options.key = route.https.key;
+                        options.cert = route.https.cert;
+                        proxy_client = https.request(options, processRes);
+                    } else {
+                        proxy_client = http.request(options, processRes);
+                    }
 
                     if (config.debug) {
                         console.log("Initiating Proxy Request with options:", options);
                     }
 
-                    var proxy_client = http.request(options, function (proxyRes) {
+                    function processRes(proxyRes) {
 
+                        if (config.debug) {
+                            console.log('Sending request ', options);
+                        }
+
+                        var responseAttachmentAudit;
+                        var isResAuditInitialized = false;
+                        proxyRes.on('data', function (chunk) {
                             if (config.debug) {
-                                console.log('Sending request ', options);
+                                console.log('Response Data is being written to client, Chunk Length:', chunk.length);
+                                console.log('Data:', chunk.toString('utf8'));
+
                             }
-
-                            var responseAttachmentAudit;
-                            var isResAuditInitialized = false;
-                            proxyRes.on('data', function (chunk) {
+                            if (!isResAuditInitialized && route.audit && route.audit.unstructured && route.audit.unstructured.auditResponse) {
+                                var key = req.transactionId + '-RES';
+                                res.key = key;
                                 if (config.debug) {
-                                    console.log('Response Data is being written to client, Chunk Length:', chunk.length);
-                                    console.log('Data:', chunk.toString('utf8'));
-
+                                    console.log("Auditing with Transaction: ", key);
                                 }
-                                if (!isResAuditInitialized && config.audit.unstructured.auditResponse) {
-                                    var key = req.transactionId + '-RES';
-                                    res.key = key;
-                                    if (config.debug) {
-                                        console.log("Auditing with Transaction: ", key);
-                                    }
-                                    // Initialize and write the first text
-                                    if (config.debug) {
-                                        console.log("Initializing Audit: ");
-                                    }
-                                    responseAttachmentAudit = initializeAudit(key);
-                                    var type = getContentType(proxyRes);
-                                    var ext = getExtension(type);
-                                    var beforeAttachmentText = getBeforeAttachment(key, key + '.' + ext, type);
-                                    if (config.debug) {
-                                        console.log("Writing Before Attachment Text: ", beforeAttachmentText);
-                                    }
-                                    responseAttachmentAudit.write(beforeAttachmentText, 'binary');
-                                    isResAuditInitialized = true;
-                                }
-                                if (!_.isUndefined(responseAttachmentAudit)) {
-                                    if (config.debug) {
-                                        console.log("Writing Audit Chunk");
-                                    }
-                                    responseAttachmentAudit.write(chunk, 'binary');
-                                }
+                                // Initialize and write the first text
                                 if (config.debug) {
-                                    console.log("Writing Client Chunk: ", chunk);
+                                    console.log("Initializing Audit: ");
                                 }
-                                res.write(chunk, 'binary');
-                            });
-
-                            proxyRes.on('end', function (data) {
-                                if (isResAuditInitialized && !_.isUndefined(responseAttachmentAudit)) {
-                                    var endAttachmentText = getEndAttachment(res.key);
-                                    if (config.debug) {
-                                        console.log('End chunk write to Audit:', endAttachmentText);
-                                    }
-                                    responseAttachmentAudit.end(endAttachmentText);
-                                }
+                                responseAttachmentAudit = initializeAudit(key, route.audit.unstructured.options);
+                                var type = getContentType(proxyRes);
+                                var ext = getExtension(type);
+                                var beforeAttachmentText = getBeforeAttachment(key, key + '.' + ext, type);
                                 if (config.debug) {
-                                    console.log('End chunk write to client');
+                                    console.log("Writing Before Attachment Text: ", beforeAttachmentText);
                                 }
-                                res.end();
+                                responseAttachmentAudit.write(beforeAttachmentText, 'binary');
+                                isResAuditInitialized = true;
+                            }
+                            if (!_.isUndefined(responseAttachmentAudit)) {
                                 if (config.debug) {
-                                    console.log('Auditing Request and Response', req, res);
+                                    console.log("Writing Audit Chunk");
                                 }
-                                audit(req, res, '', function (auditRes) {});
-                            });
-
-                            proxyRes.on('error', function (e) {
-                                console.error('Error with client ', e);
-                                res.writeHead(404, 'Not Found');
-                                res.end();
-                                if (isResAuditInitialized && !_.isUndefined(responseAttachmentAudit)) {
-                                    if (config.debug) {
-                                        console.log('End chunk write to Audit with Error:' + e);
-                                    }
-                                    if (config.debug) {
-                                        console.log('End chunk write to Audit:', endAttachmentText);
-                                    }
-                                    var endAttachmentText = getEndAttachment(res.key);
-                                    responseAttachmentAudit.end(endAttachmentText);
-                                }
-                                if (config.debug) {
-                                    console.log('Auditing Request and Response:', req, res);
-                                }
-                                audit(req, res, e, function (auditRes) {});
-                            });
-                            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+                                responseAttachmentAudit.write(chunk, 'binary');
+                            }
+                            if (config.debug) {
+                                console.log("Writing Client Chunk: ", chunk);
+                            }
+                            res.write(chunk, 'binary');
                         });
+
+                        proxyRes.on('end', function (data) {
+                            if (isResAuditInitialized && !_.isUndefined(responseAttachmentAudit)) {
+                                var endAttachmentText = getEndAttachment(res.key);
+                                if (config.debug) {
+                                    console.log('End chunk write to Audit:', endAttachmentText);
+                                }
+                                responseAttachmentAudit.end(endAttachmentText);
+                            }
+                            if (config.debug) {
+                                console.log('End chunk write to client');
+                            }
+                            res.end();
+                            if (config.debug) {
+                                console.log('Auditing Request and Response', req, res);
+                            }
+                            if (route.audit && route.audit.structured && route.audit.structured.auditResponse) {
+                                audit(route.audit.structured.options, req, res, '', function (auditRes) {});
+                            }
+                        });
+
+                        proxyRes.on('error', function (e) {
+                            console.error('Error with client ', e);
+                            res.writeHead(404, 'Not Found');
+                            res.end();
+                            if (isResAuditInitialized && !_.isUndefined(responseAttachmentAudit)) {
+                                if (config.debug) {
+                                    console.log('End chunk write to Audit with Error:' + e);
+                                }
+                                if (config.debug) {
+                                    console.log('End chunk write to Audit:', endAttachmentText);
+                                }
+                                var endAttachmentText = getEndAttachment(res.key);
+                                responseAttachmentAudit.end(endAttachmentText);
+                            }
+                            if (config.debug) {
+                                console.log('Auditing Request and Response:', req, res);
+                            }
+                            if (route.audit && route.audit.structured && route.audit.structured.auditResponse) {
+                                audit(route.audit.structured.options, req, res, e, function (auditRes) {});
+                            }
+                        });
+                        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+                    }
 
                     var isReqAuditInitialized = false;
                     var requestAttachmentAudit;
@@ -221,7 +211,7 @@ var handler = function (req, res) {
                         }
 
                         // First time
-                        if (!isReqAuditInitialized && config.audit.unstructured.auditRequest) {
+                        if (!isReqAuditInitialized && route.audit && route.audit.unstructured && route.audit.unstructured.auditRequest) {
                             var key = req.transactionId + '-REQ';
                             req.key = key;
                             var type = getContentType(req);
@@ -233,7 +223,7 @@ var handler = function (req, res) {
                             if (config.debug) {
                                 console.log("Initializing Audit: ");
                             }
-                            requestAttachmentAudit = initializeAudit(key);
+                            requestAttachmentAudit = initializeAudit(key, route.unstructured.auditRequest.options);
                             var beforeAttachmentText = getBeforeAttachment(key, key + '.' + ext, type);
                             if (config.debug) {
                                 console.log("Writing Before Attachment Text: ", beforeAttachmentText);
@@ -263,9 +253,9 @@ var handler = function (req, res) {
                             }
                             requestAttachmentAudit.end(endAttachmentText);
                         }
-						if(config.debug) {
-							console.log('End chunk write to server');
-						}
+                        if (config.debug) {
+                            console.log('End chunk write to server');
+                        }
                         proxy_client.end();
                     });
 
@@ -361,9 +351,9 @@ function getAttachmentHeader(key) {
     return requestAttachmentHeader;
 }
 
-function getAttachmentAuditOptions(key) {
+function getAttachmentAuditOptions(key, auditOptions) {
     var header = getAttachmentHeader(key);
-    var options = config.audit.unstructured.options;
+    var options = auditOptions;
     options.headers = header;
     if (config.debug) {
         console.log('Getting Attachment Audit options: ', options);
@@ -371,13 +361,13 @@ function getAttachmentAuditOptions(key) {
     return options;
 }
 
-function initializeAudit(key) {
+function initializeAudit(key, options) {
     //These are the post options
     if (config.debug) {
         console.log('Initializing audit for id: ', key);
     }
 
-    requestAttachmentAudit = http.request(getAttachmentAuditOptions(key));
+    requestAttachmentAudit = http.request(getAttachmentAuditOptions(key, options));
 
     requestAttachmentAudit.on('error', function (e) {
         console.error('Problem with request attachment audit: ' + e);
@@ -425,7 +415,7 @@ function configureOptions(configOptions) {
     options.https.requestCert = configOptions.https.requestCert;
     options.https.rejectUnauthorized = configOptions.https.rejectUnauthorized;
     options.https.agent = configOptions.https.agent;
-    
+
     if (!_.isUndefined(configOptions.https.ca) && Array.isArray(configOptions.https.ca)) {
         options.https.ca = [];
         for (var i = 0; i < configOptions.https.ca.length; i++) {
@@ -435,7 +425,7 @@ function configureOptions(configOptions) {
             options.https.ca[i] = fs.readFileSync(configOptions.https.ca[i]);
         }
     }
-    
+
     options.https.passphrase = configOptions.https.passphrase;
     return options;
 }
@@ -444,6 +434,13 @@ if (config.debug) {
     console.log("Server Configuration from file:", config.secureServer.options);
 }
 var options = configureOptions(config.secureServer.options);
+for (var i = 0; i < config.routes.length; i++) {
+    for (var j = 0; j < config.routes[i].options.length; j++) {
+        if (config.routes[i].options[j].https) {
+            config.routes[i].options[j].https = configureOptions(config.routes[i].options[j]).https;
+        }
+    }
+}
 if (config.debug) {
     console.log("Server Configuration:", options);
 }
@@ -479,8 +476,8 @@ if (cluster.isMaster) {
     }
 }
 
-function audit(req, res, err, callback) {
-    var auditService = http.request(config.audit.structured.options, function (auditRes) {
+function audit(options, req, res, err, callback) {
+    var auditService = http.request(options, function (auditRes) {
             auditRes.on('data', function (chunk) {
                 if (config.debug) {
                     console.log('Write to audit client ', chunk.length);
@@ -537,8 +534,8 @@ process.on('SIGINT', function () {
 })
 // Default exception handler
 process.on('exit', function (err) {
-	if(err)
-		console.log('Exiting.. Error:', err);
-	else 
-		console.log('Exiting..');
+    if (err)
+        console.log('Exiting.. Error:', err);
+    else
+        console.log('Exiting..');
 });
