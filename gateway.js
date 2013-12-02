@@ -108,6 +108,16 @@ var handler = function (req, res) {
                         proxy_client = http.request(options, processRes);
                     }
 
+                    proxy_client.on('socket', function (socket) {
+                        if (!_.isUndefined(route.timeout)) {
+                            proxy_client.setTimeout(route.timeout, function () {
+                                res.writeHead(500, 'Server error');
+                                res.end('The gateway experienced a timoue.');
+                                socket.destroy();
+                            });
+                        }
+                    });
+                    
                     if (config.debug) {
                         console.log("Initiating Proxy Request with options:", options);
                     }
