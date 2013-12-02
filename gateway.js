@@ -76,7 +76,8 @@ var handler = function (req, res) {
         if (config.debug) {
             console.log("Routing..");
         }
-        for (var i = 0; i < config.routes.length; i++) {
+        var i;
+        for (i = 0; i < config.routes.length; i++) {
             if (!_.isUndefined(req.parsedUrl.pathname)) {
                 if (S(req.parsedUrl.pathname).contains(config.routes[i].path)) {
                     if (config.debug) {
@@ -180,7 +181,7 @@ var handler = function (req, res) {
                         proxyRes.on('error', function (e) {
                             console.error('Error with client ', e);
                             res.writeHead(404, 'Not Found');
-                            res.end();
+                            res.end('Not Found');
                             if (isResAuditInitialized && !_.isUndefined(responseAttachmentAudit)) {
                                 if (config.debug) {
                                     console.log('End chunk write to Audit with Error:' + e);
@@ -272,11 +273,16 @@ var handler = function (req, res) {
                         }
                         proxy_client.end();
                         res.writeHead(404, 'Not Found');
-                        res.end();
+                        res.end('Not Found');
                     });
                     break;
                 }
             }
+        }
+        // handle no route found.
+        if (i === config.routes.length) {
+            res.writeHead(404, 'Not Found');
+            res.end('Not Found');
         }
     } else if (S(req.parsedUrl.path).contains('ping') || S(req.parsedUrl.path).contains('PING')) {
         if (config.debug) {
@@ -293,7 +299,7 @@ var handler = function (req, res) {
             console.log("Sending Error 404..");
         }
         res.writeHead(404, 'Not Found');
-        res.end();
+        res.end('Not Found');
         return;
     }
 
