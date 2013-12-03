@@ -103,6 +103,9 @@ var handler = function (req, res) {
                         options.rejectUnauthorized = route.https.rejectUnauthorized;
                         options.key = route.https.key;
                         options.cert = route.https.cert;
+                        options.ca = route.https.ca;
+                        options.pfx = route.https.pfx;
+                        options.agent = new https.Agent(options);
                         proxy_client = https.request(options, processRes);
                     } else {
                         proxy_client = http.request(options, processRes);
