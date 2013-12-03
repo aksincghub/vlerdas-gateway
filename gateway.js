@@ -114,8 +114,8 @@ var handler = function (req, res) {
                     proxy_client.on('socket', function (socket) {
                         if (!_.isUndefined(route.timeout)) {
                             proxy_client.setTimeout(route.timeout, function () {
-                                res.writeHead(500, 'Server error');
-                                res.end('The gateway experienced a timoue.');
+                                res.writeHead(504, 'Gateway Timeout');
+                                res.end('The gateway experienced a timout.');
                                 socket.destroy();
                             });
                         }
