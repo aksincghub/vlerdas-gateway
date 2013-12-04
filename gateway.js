@@ -105,6 +105,7 @@ var handler = function (req, res) {
                         options.cert = route.https.cert;
                         options.ca = route.https.ca;
                         options.pfx = route.https.pfx;
+                        options.passphrase = route.https.passphrase;
                         options.agent = new https.Agent(options);
                         proxy_client = https.request(options, processRes);
                     } else {
