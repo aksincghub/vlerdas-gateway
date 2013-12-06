@@ -456,15 +456,16 @@ if (config.debug && config.secureServer) {
 
 if(config.secureServer) {
 	var options = configureOptions(config.secureServer.options);
-	for (var i = 0; i < config.routes.length; i++) {
-		for (var j = 0; j < config.routes[i].options.length; j++) {
-			if (config.routes[i].options[j].https) {
-				config.routes[i].options[j].https = configureOptions(config.routes[i].options[j]).https;
-			}
-		}
-	}
 	if (config.debug) {
 		console.log("Server Configuration:", options);
+	}
+}
+// Load all security
+for (var i = 0; i < config.routes.length; i++) {
+	for (var j = 0; j < config.routes[i].options.length; j++) {
+		if (config.routes[i].options[j].https) {
+			config.routes[i].options[j].https = configureOptions(config.routes[i].options[j]).https;
+		}
 	}
 }
 
