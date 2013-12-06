@@ -450,19 +450,22 @@ function configureOptions(configOptions) {
     return options;
 }
 
-if (config.debug) {
+if (config.debug && config.secureServer) {
     console.log("Server Configuration from file:", config.secureServer.options);
 }
-var options = configureOptions(config.secureServer.options);
-for (var i = 0; i < config.routes.length; i++) {
-    for (var j = 0; j < config.routes[i].options.length; j++) {
-        if (config.routes[i].options[j].https) {
-            config.routes[i].options[j].https = configureOptions(config.routes[i].options[j]).https;
-        }
-    }
-}
-if (config.debug) {
-    console.log("Server Configuration:", options);
+
+if(config.secureServer) {
+	var options = configureOptions(config.secureServer.options);
+	for (var i = 0; i < config.routes.length; i++) {
+		for (var j = 0; j < config.routes[i].options.length; j++) {
+			if (config.routes[i].options[j].https) {
+				config.routes[i].options[j].https = configureOptions(config.routes[i].options[j]).https;
+			}
+		}
+	}
+	if (config.debug) {
+		console.log("Server Configuration:", options);
+	}
 }
 
 if (cluster.isMaster) {
@@ -487,12 +490,16 @@ if (cluster.isMaster) {
         }
     });
 } else {
-    https.createServer(options.https, handler).listen(config.secureServer.port, config.secureServer.host);
+	if(config.secureServer) {
+		https.createServer(options.https, handler).listen(config.secureServer.port, config.secureServer.host);
+	}
     http.createServer(handler).listen(config.server.port, config.server.host);
 
     if (config.debug) {
         console.log("Proxy listening on Port:", config.server.port, ' Host:', config.server.host);
-        console.log("Proxy listening on Port:", config.secureServer.port, ' Host:', config.secureServer.host);
+		if(config.secureServer) {
+			console.log("Proxy listening on Port:", config.secureServer.port, ' Host:', config.secureServer.host);
+		}
     }
 }
 
