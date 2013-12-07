@@ -258,7 +258,7 @@ var handler = function (req, res) {
                                 console.log('Auditing Request and Response', req, res);
                             }
                             if (route.audit && route.audit.structured && route.audit.structured.auditResponse) {
-                                audit(route.audit.structured.options, req, res, '', function (auditRes) {});
+                                audit(route.audit.structured.options, req, res, proxyRes, '', function (auditRes) {});
                             }
                         });
 
@@ -280,7 +280,7 @@ var handler = function (req, res) {
                                 console.log('Auditing Request and Response:', req, res);
                             }
                             if (route.audit && route.audit.structured && route.audit.structured.auditResponse) {
-                                audit(route.audit.structured.options, req, res, e, function (auditRes) {});
+                                audit(route.audit.structured.options, req, res, proxyRes, e, function (auditRes) {});
                             }
 							if(route.buffer) {
 								try {
@@ -583,7 +583,7 @@ if (cluster.isMaster) {
     }
 }
 
-function audit(options, req, res, err, callback) {
+function audit(options, req, res, proxyRes, err, callback) {
     var auditService = http.request(options, function (auditRes) {
             auditRes.on('data', function (chunk) {
                 if (config.debug) {
@@ -603,6 +603,10 @@ function audit(options, req, res, err, callback) {
 
         });
 
+	req = req ? req : {};
+	res = res ? res : {};
+	proxyRes = proxyRes ? proxyRes : {};
+
     var audit = {};
     audit.transactionId = req.transactionId;
     audit.req = {}
@@ -620,6 +624,11 @@ function audit(options, req, res, err, callback) {
     audit.res.statusCode = res.statusCode;
     audit.res.key = res.key;
     audit.res.err = err;
+	
+	audit.proxyRes = {};
+    audit.proxyRes.headers = proxyRes.headers;
+    audit.res.statusCode = proxyRes.statusCode;
+	
 
     var auditStr = JSON.stringify(audit);
     if (config.debug) {
