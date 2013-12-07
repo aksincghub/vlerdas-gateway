@@ -170,12 +170,16 @@ var handler = function (req, res) {
                         var responseAttachmentAudit;
                         var isResAuditInitialized = false;
 						
+						var uploadedSize = 0;
+						var fileSizeStr = proxyRes.headers['content-length'];
+						var fileSize = 0;
+						if(!_.isUndefined(fileSizeStr)) {
+							fileSize = parseInt(fileSizeStr);
+						}
+
 						if(route.buffer) {
-							var buffer;
 							var path = Path.join(getTempDir(), req.transactionId);
 							var file = fs.createWriteStream(path);
-							var fileSize = proxyRes.headers['content-length'];
-							var uploadedSize = 0;
 							
 							file.on('drain', function() {
 								proxyRes.resume();
@@ -217,8 +221,8 @@ var handler = function (req, res) {
                             if (config.debug) {
                                 console.log("Writing Client Chunk: ", chunk);
                             }
+							uploadedSize += chunk.length;
 							if(route.buffer) {
-								uploadedSize += chunk.length;
 								uploadProgress = (uploadedSize/fileSize) * 100;
 								if(config.debug)
 									console.log(Math.round(uploadProgress) + "%" + " downloaded\n" );
@@ -241,9 +245,24 @@ var handler = function (req, res) {
                             if (config.debug) {
                                 console.log('End chunk write to client');
                             }
+							
+							var errState = false;
+							if(route.strictLength) {
+								if(config.debug) {
+									console.log('Length - Content-Length:' + fileSize + ' UploadedSize:' + uploadedSize);
+								}
+								if(fileSize != uploadedSize) {
+									res.writeHead(504, 'HTTP Header Content-Length does not match received document size, Content-length:' + fileSize + ' Uploaded Size:' + uploadedSize);
+									res.end('HTTP Header Content-Length does not match received document size.');
+									errState = true;
+								}
+							}
+							
 							if(route.buffer) {
-								res.writeHead(proxyRes.statusCode, proxyRes.headers);
-								fs.createReadStream(path).pipe(res);
+								if(!errState) {
+									res.writeHead(proxyRes.statusCode, proxyRes.headers);
+									fs.createReadStream(path).pipe(res);
+								}
 								try {
 									fs.unlink(path);
 								} catch (err) {
@@ -251,7 +270,8 @@ var handler = function (req, res) {
 								}
 							}
 							else {
-								res.end();
+								if(!errState)
+									res.end();
 							}
 						
                             if (config.debug) {
@@ -264,8 +284,8 @@ var handler = function (req, res) {
 
                         proxyRes.on('error', function (e) {
                             console.error('Error with client ', e);
-                            res.writeHead(404, 'Not Found');
-                            res.end('Not Found');
+                            res.writeHead(500, e);
+                            res.end('Error Occured');
                             if (isResAuditInitialized && !_.isUndefined(responseAttachmentAudit)) {
                                 if (config.debug) {
                                     console.log('End chunk write to Audit with Error:' + e);
