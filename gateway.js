@@ -15,6 +15,39 @@ var ofuda = new Ofuda(config.ofuda);
 var uuid = require('node-uuid');
 var cluster = require("cluster");
 var numCPUs = require('os').cpus().length;
+var Path = require('path'), os;
+
+try {
+    os = require('os');
+} catch (e) {}
+
+
+// Memoized because those fs.realpathSync calls are expensive:
+var tempDir;
+function getTempDir() {
+    if (!tempDir) {
+        if (os && os.tmpDir) {
+            tempDir = os.tmpDir();
+        } else {
+            var environmentVariableNames = ['TMPDIR', 'TMP', 'TEMP'];
+            for (var i = 0 ; i < environmentVariableNames.length ; i += 1) {
+                var environmentVariableValue = process.env[environmentVariableNames[i]];
+                if (environmentVariableValue) {
+                    tempDir = fs.realpathSync(environmentVariableValue);
+                    break;
+                }
+            }
+            if (!tempDir) {
+                if (process.platform === 'win32') {
+                    tempDir = fs.realpathSync('c:\\tmp');
+                } else {
+                    tempDir = fs.realpathSync('/tmp');
+                }
+            }
+        }
+    }
+    return tempDir;
+}
 
 var isAuthorized = function (user) {
     if (config.debug) {
@@ -98,7 +131,9 @@ var handler = function (req, res) {
                         method : req.method,
                         headers : req.headers,
                     }
+				
                     var proxy_client;
+
                     if (!_.isUndefined(route.https)) {
                         options.rejectUnauthorized = route.https.rejectUnauthorized;
                         options.key = route.https.key;
@@ -134,7 +169,20 @@ var handler = function (req, res) {
 
                         var responseAttachmentAudit;
                         var isResAuditInitialized = false;
-                        proxyRes.on('data', function (chunk) {
+						
+						if(route.buffer) {
+							var buffer;
+							var path = Path.join(getTempDir(), req.transactionId);
+							var file = fs.createWriteStream(path);
+							var fileSize = proxyRes.headers['content-length'];
+							var uploadedSize = 0;
+							
+							file.on('drain', function() {
+								proxyRes.resume();
+							});
+						}
+                        
+						proxyRes.on('data', function (chunk) {
                             if (config.debug) {
                                 console.log('Response Data is being written to client, Chunk Length:', chunk.length);
                                 console.log('Data:', chunk.toString('utf8'));
@@ -169,10 +217,20 @@ var handler = function (req, res) {
                             if (config.debug) {
                                 console.log("Writing Client Chunk: ", chunk);
                             }
-                            res.write(chunk, 'binary');
+							if(route.buffer) {
+								uploadedSize += chunk.length;
+								uploadProgress = (uploadedSize/fileSize) * 100;
+								if(config.debug)
+									console.log(Math.round(uploadProgress) + "%" + " downloaded\n" );
+								var bufferStore = file.write(chunk);
+								if(bufferStore == false)
+									proxyRes.pause();
+							} else {
+								res.write(chunk, 'binary');
+							}
                         });
 
-                        proxyRes.on('end', function (data) {
+						proxyRes.on('end', function (data) {
                             if (isResAuditInitialized && !_.isUndefined(responseAttachmentAudit)) {
                                 var endAttachmentText = getEndAttachment(res.key);
                                 if (config.debug) {
@@ -183,7 +241,19 @@ var handler = function (req, res) {
                             if (config.debug) {
                                 console.log('End chunk write to client');
                             }
-                            res.end();
+							if(route.buffer) {
+								res.writeHead(proxyRes.statusCode, proxyRes.headers);
+								fs.createReadStream(path).pipe(res);
+								try {
+									fs.unlink(path);
+								} catch (err) {
+									console.error('Could not unlink file:' + path);
+								}
+							}
+							else {
+								res.end();
+							}
+						
                             if (config.debug) {
                                 console.log('Auditing Request and Response', req, res);
                             }
@@ -212,8 +282,19 @@ var handler = function (req, res) {
                             if (route.audit && route.audit.structured && route.audit.structured.auditResponse) {
                                 audit(route.audit.structured.options, req, res, e, function (auditRes) {});
                             }
+							if(route.buffer) {
+								try {
+									fs.unlink(path);
+								} catch (err) {
+									console.error('Could not unlink file:' + path);
+								}
+							}
                         });
-                        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+						if(route.buffer) {
+							// Allow empty config
+						} else {
+							res.writeHead(proxyRes.statusCode, proxyRes.headers);
+						}
                     }
 
                     var isReqAuditInitialized = false;
@@ -259,8 +340,6 @@ var handler = function (req, res) {
                     });
 
                     req.on('end', function () {
-                        //if (config.debug) {
-                        //}
                         if (isReqAuditInitialized && !_.isUndefined(requestAttachmentAudit)) {
                             var endAttachmentText = getEndAttachment(req.key);
                             if (config.debug) {

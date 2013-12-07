@@ -1,10 +1,10 @@
 {
     "server" : {
-        "port" : 80,
+        "port" : 8000,
         "host" : "localhost"
     },
     "secureServer" : {
-        "port" : 443,
+        "port" : 8443,
         "host" : "127.0.0.1",
         "options" : {
             "https" : {
@@ -111,15 +111,11 @@
         }, {
             "path" : "/pdfs",
             "options" : [{
-                    "host" : "www.avo.alaska.edu",
-                    "port" : "443",
-					"https" : {
-						"rejectUnauthorized" : false
-					},
-                    "timeout" : 120000,
-					"buffer": true
-
-                }
+                    "host" : "localhost",
+                    "port" : "80",
+                    "xforward" : true,
+                    "changeOrgin" : false,
+                    "timeout" : 120000                }
             ]
         }
     ],
