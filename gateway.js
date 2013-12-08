@@ -252,7 +252,8 @@ var handler = function (req, res) {
 									console.log('Length - Content-Length:' + fileSize + ' UploadedSize:' + uploadedSize);
 								}
 								if(fileSize != uploadedSize) {
-									res.writeHead(504, 'HTTP Header Content-Length does not match received document size, Content-length:' + fileSize + ' Uploaded Size:' + uploadedSize);
+									console.error('HTTP Header Content-Length does not match received document size, Content-length:' + fileSize + ' Uploaded Size:' + uploadedSize);
+									res.writeHead(500, 'HTTP Header Content-Length does not match received document size, Content-length:' + fileSize + ' Uploaded Size:' + uploadedSize);
 									res.end('HTTP Header Content-Length does not match received document size.');
 									errState = true;
 								}
