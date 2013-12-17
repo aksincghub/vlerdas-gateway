@@ -113,7 +113,8 @@
                     "port" : "80",
                     "xforward" : true,
                     "changeOrgin" : false,
-                    "timeout" : 120000                }
+                    "timeout" : 120000 
+                }
             ]
         }
     ],
@@ -143,8 +144,7 @@
             "colorize" : true,
             "label" : "NJSGATEWAY",
             "timestamp" : true,
-            "silent" : false
-            
+            "silent" : false            
         },
         "file" : {
             "level" : "trace",
