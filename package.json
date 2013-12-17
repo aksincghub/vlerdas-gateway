@@ -1,25 +1,25 @@
 {
   "name": "vgateway",
-  "version": "0.1.1",
-  "description": "VLER Gateway",
+  "version": "0.2.0",
+  "description": "VLER Node.js Gateway",
   "keywords": [
     "http",
+    "https",
     "audit",
     "proxy"
   ],
   "author": "Julian Jewel <julian@julianjewel.com>",
-  "main": "./index.js",
-  "scripts": {
-    "test": "node ./test/test.js"
-  },
+  "main": "./gateway.js",  
   "dependencies": {
+    "connect": ">=2.11.2",
     "underscore": ">=1.5.2",
 	"config": ">=0.4.31",
 	"string": ">=1.6.0",
 	"ofuda": ">=0.3.1",
 	"request" : ">=2.27.0",
 	"mime": ">=1.2.11",
-	"node-uuid": ">=1.4.1"
+	"node-uuid": ">=1.4.1",
+	"winston": ">=0.7.2"
   },
   "devDependencies": {
   },
