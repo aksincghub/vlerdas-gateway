@@ -116,7 +116,6 @@
 					},
                     "timeout" : 120000,
 					"buffer": true
-
                 }
             ]
         }
@@ -147,8 +146,7 @@
             "colorize" : true,
             "label" : "NJSGATEWAY",
             "timestamp" : true,
-            "silent" : false
-            
+            "silent" : false            
         },
         "file" : {
             "level" : "trace",

@@ -2,6 +2,7 @@ var connect = require("connect");
 var config = require('config');
 var _ = require('underscore');
 var mime = require('mime');
+var util = require('util')
 var S = require('string');
 // Note: included so url.parse will use 
 // this to parse the gateway request query string 
@@ -21,6 +22,7 @@ var cluster = require("cluster");
 var numCPUs = require('os').cpus().length;
 var Path = require('path'), 
     os;
+var longjohn = require('longjohn');
 var winston = require('winston');
 // initialize the logger instance
 var logger = getLogger();
@@ -76,7 +78,7 @@ var validateCredentials = function (requestAccessKeyId) {
 
 // define routing 'handler' function to handle gateway request processing
 var handler = function (req, res) {
-	logger.trace("Received gateway request, where gateway request has method: ",req.method,", and URL: ", req.url);
+	logger.trace("Received gateway request, where gateway request has method: "+req.method+", and URL: "+req.url);
 
     if (config.accessControl) {
     	logger.trace("Checking Authorization for requestor, method, and URL path...");    
@@ -133,6 +135,7 @@ var handler = function (req, res) {
                     }
 
                     // define proxy_client and begin proxy http(s) request (asynchronous)
+                    // Note: proxy_client will be an instance of type http.ClientRequest
                     var proxy_client;
                     if (!_.isUndefined(route.https)) {
                         options.rejectUnauthorized = route.https.rejectUnauthorized;
@@ -146,16 +149,19 @@ var handler = function (req, res) {
                         proxy_client = https.request(options, processRes);
                     } else {
                         proxy_client = http.request(options, processRes);
-                    }
+                    }                    
                     
                     // handle the 'socket' event, which is emitted after a socket is assigned to this request from the socket pool by the Agent
                     proxy_client.on('socket', function (socket) {
+                    	logger.trace("proxy client on socket event thrown...");
                         if (!_.isUndefined(route.timeout)) {
+                        	logger.trace("setting route.timeout to: "+route.timeout);
                         	// set the explicitly defined timeout, and return a 504 response if the timeout occurs, 
                         	// and release the socket from this request
+                        	// Note: called once a socket is assigned to this request and is connected
                             proxy_client.setTimeout(route.timeout, function () {
 								// Note: if streaming to client has started, this writeHead call will have no effect.
-                            	logger.trace('Experienced a proxy request time-out to route: '+route.host+':'+route.port+''+req.parsedUrl.path+", returning 504/Gateway Timeout gateway response");
+                            	logger.trace('Experienced a proxy request time-out to route: '+route.host+':'+route.port+''+req.parsedUrl.path+', returning 504/Gateway Timeout gateway response');                            	  
                                 res.writeHead(504, 'Gateway Timeout');
                                 res.end('The gateway experienced a proxy request time-out.');
                                 socket.destroy();                                
@@ -164,29 +170,44 @@ var handler = function (req, res) {
                     });
 
                     // handle error event experienced when processing proxy client request 
+                    // - emitted if there was an error writing or piping data for the stream.writable operations?
                     proxy_client.on('error', function (err) {
-                        // Note: if streaming to proxy client has started then writeHead call will have no effect.
-                    	// return error gateway response 
-                        res.writeHead(500, 'Internal Server Error');
-                        res.write('There was a communication error with upstream server.');
-                        res.end();
-                        // TODO: audit the gateway error response?
-                        // if file buffering set for this configured route
-                        /* - TODO: clean up file.  This was causing un-handled exception.                       
-                        if (route.buffer) {
-                            // release the tmp file in the tmp directory
-                            try {
-                                fs.unlink(path);
-                            } catch (err) {
-                                logger.error('Could not unlink file:' + path + ", where error: ",err);
-                            }
+                    	if (res.headersSent) {
+                    		// assume response was already sent elsewhere
+                    		//logger.trace('already returned a gateway response');                        
+                    	} else {
+                    		logger.error('proxy client request error event emitted!, where error: '+err);
+                            // Note: if streaming to proxy client has started then writeHead call will have no effect.
+                        	// return default error gateway response                     		
+                    		res.writeHead(500, 'Internal Server Error');
+                    		res.write('There was a communication error with upstream server.');
+                    		res.end();
+                    	}
+                        // audit the gateway response to the proxy request error:
+                    	// perform gateway request, gateway response, proxy error response structured audit logging if config set
+                        if (route.audit && route.audit.structured && route.audit.structured.auditRequestResponse) {
+                        	logger.trace('Auditing gateway request and response (and proxy client\'s request error)');
+                            audit(route.audit.structured.options, req, res, '', err, function(auditRes) {});
                         }
-                        */
+                        // if file buffering set for this configured route                                         
+                        if (route.buffer) {
+                            // release the tmp file in the tmp directory                           
+                        	fs.exists(path, function (exists) {
+                        		if (exists) {
+                        			fs.unlink(path, function (err) { 
+                                    	if(err) {
+                                    		logger.error('Could not unlink file:' + path + ", where error: ",err);
+                                    	}
+                                    });
+                        		}                        		  
+                        	});
+                        }
                     });
 
-                    logger.trace("Initiating proxy request with options: ", options); 
+                    logger.trace("Initiating proxy request with options: \n", util.inspect(options)); 
 
 					// define the proxy_client's response-handler callback method
+                    // Note: proxyRes is an instance of type http.IncomingMessage
                     function processRes(proxyRes) {
 						logger.trace('Handling proxy response received, for proxy request sent with options: ', options); 
                     	
@@ -307,11 +328,11 @@ var handler = function (req, res) {
                                     fs.createReadStream(path).pipe(res);
                                 }
                                 // release the tmp file in the tmp directory
-                                try {
-                                    fs.unlink(path);
-                                } catch (err) {
-                                	logger.error('Could not unlink file:' + path + ", where error: ",err);
-                                }
+                                fs.unlink(path, function (err) { 
+                                    if(err) {
+                                    	logger.error('Could not unlink file:' + path + ", where error: ",err);
+                                    }
+                                });
                             } else { // no file buffering
                             	// if no errors occurred
                                 if (!errState) {
@@ -348,13 +369,14 @@ var handler = function (req, res) {
                             // if file buffering set for this configured route
                             if (route.buffer) {
                             	// release the tmp file in the tmp directory
-                                try {
-                                    fs.unlink(path);
-                                } catch (err) {
-                                	logger.error('Could not unlink file:' + path + ", where error: ",err);
-                                }
+                            	fs.unlink(path, function (err) { 
+                                    if(err) {
+                                    	logger.error('Could not unlink file:' + path + ", where error: ",err);
+                                    }
+                                });
                             }
                         });
+                        
                         // if file buffering set for this configured route
                         if (route.buffer) {
                             // Allow empty config
@@ -609,14 +631,15 @@ if (cluster.isMaster) {
     cluster.on('listening', function (worker, address) {        
     	logger.info('A worker #'+worker.id+' is now connected to: ' + address.address + ':' + address.port);        
     });
-    cluster.on('disconnect', function (worker, address) {        
-    	logger.info('A worker #'+worker.id+' is now disconnected from: ' + address.address + ':' + address.port);        
+    cluster.on('disconnect', function (worker) {        
+    	logger.info('A worker #'+worker.id+' is now disconnected');        
     });
     cluster.on('exit', function (worker, code, signal) {
     	logger.info('worker #: ' + worker.process.pid + ' died');        
     });
 } else {
-	// this is a cluster worker, so initialize http/https server instance(s) from config options using connect 'app' middleware with 'handler' function set
+	// this is a cluster worker, so initialize http/https server instance(s) 
+	// from config options using connect 'app' middleware with 'handler' function set
     var httpsServer;
     if (config.secureServer) {
     	httpsServer = https.createServer(options.https, app).listen(config.secureServer.port, config.secureServer.host, function () {
