@@ -1,7 +1,7 @@
 {
   "name": "vgateway",
   "version": "0.2.0",
-  "description": "VLER Node.js Gateway",
+  "description": "VA VLER Node.js Gateway",
   "keywords": [
     "http",
     "https",
@@ -19,7 +19,6 @@
 	"request" : ">=2.27.0",
 	"mime": ">=1.2.11",
 	"node-uuid": ">=1.4.1",
-	"longjohn": ">=0.2.2",
 	"winston": ">=0.7.2"
   },
   "devDependencies": {

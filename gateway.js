@@ -22,7 +22,6 @@ var cluster = require("cluster");
 var numCPUs = require('os').cpus().length;
 var Path = require('path'), 
     os;
-var longjohn = require('longjohn');
 var winston = require('winston');
 // initialize the logger instance
 var logger = getLogger();
@@ -64,31 +63,225 @@ function getTempDir() {
     return tempDir;
 }
 
-var isAuthorized = function (user) {
-	logger.trace("Checking if user is authorized, where user: " + user);    
-    return user.allowMethods === "*" || user.allowMethods.indexOf(req.method) >= 0;
+// define 2-way SSL/TLS client certificate authorization function
+// contains stolen cert logic from from:
+// https://github.com/tgies/client-certificate-auth/blob/master/lib/clientCertificateAuth.js
+//var authorizeClientCertSubject = function (req, callback) {
+var authorizeClientCertSubject = function (req) {
+	// see if SSL/TLS-encrypted request has been received
+	if(req.connection.encrypted) {
+	  // connected with SSL/TLS encryption - perform authorization on requestor from cert.subject.CN		
+	  logger.trace("request received has SSL/TLS encryption: testing if valid certificate included and validated at protocol level..."); 
+	  // ensure that the certificate was validated at the protocol level
+	  if (!req.client.authorized) {
+	    var e = new Error('Unauthorized: no Client certificate found - Client certificate required!' +
+	                  '(' + req.client.authorizationError + ')');
+	    e.status = 401;
+	    return e;
+	  }
+
+	  // obtain client certificate details
+	  logger.trace("attempting to get Client certificate information...");
+	  var cert = req.connection.getPeerCertificate();	   
+	  if (!cert || !Object.keys(cert).length) {
+	    // Handle the bizarre and probably unreal case that a certificate was
+	    // validated, but we can't actually inspect it
+	    var e = new Error('Client certificate was authenticated, but certificate ' +
+	          'information could not be retrieved!');
+	    e.status = 500;
+	    return e;
+	  }
+
+	  // Test the client certificate Subject Common Name value: 
+	  // if it evaluates to true and matches a config. values, the request may proceed; 
+	  // else return with a 401 Unauthorized response.
+	  // attempt to match the given cert.subject.CN value with a config.useClientCertAuth user value	  
+	  var certSubjCN = S(cert.subject.CN).trim().s;
+	  logger.trace("received and attempting to authorize Client certificate Subject Common Name (CN) value:",certSubjCN);
+	  var authenticatedUser = config.useClientCertAuth[certSubjCN];
+	  if (authenticatedUser) {
+		// have match with the cert. subject, so move onto resource authorization
+		// test for allowed method
+		logger.trace("attempting to authorize requestor by request method:", req.method);
+		if (authenticatedUser.allowMethods === "*" || S(authenticatedUser.allowMethods).contains(req.method)) {
+			// test for allowed route
+			if (!_.isUndefined(req.parsedUrl.pathname) && req.parsedUrl.pathname!=='/') {
+				// have a path
+				logger.trace("attempting to authorize requestor to route by request path:", req.parsedUrl.pathname);
+				// loop the allowRoutes array to find a match for the given request path
+				var isPathMatched = false;
+				var i;
+		        for (i = 0; i < authenticatedUser.allowRoutes.length; i++) {
+		        	if (S(req.parsedUrl.pathname).contains(authenticatedUser.allowRoutes[i])) {
+		        		// have a path match! - client is authorized
+		        		isPathMatched = true;
+		        		// stop looping
+		        		break;
+		        	}		        	
+		        }
+		        if (isPathMatched) {
+		        	// success, so allow request, do nothing
+		        	logger.trace("requestor with cert.Subject.CN="+certSubjCN+" authorized for request method and path");
+		        	return null;
+		        } else {
+		        	// failed allowed routes check - set Unauthorized error
+		        	var e = new Error('Unauthorized: Client certificate Subject Common Name value not authorized for request route!');
+				    e.status = 401;
+				    return e;
+		        }		        
+			} else {
+				// no pathname in request - so allow request for auth. user, do nothing
+				// Note: this allows the 404 response to be returned
+				logger.trace("requestor with cert.Subject.CN="+certSubjCN+" authorized for a request without a path");
+	        	return null;
+			}				
+		} else {
+			// failed allowed methods check - set Unauthorized error
+			var e = new Error('Unauthorized: Client certificate Subject Common Name value not authorized for request method!');
+		    e.status = 401;
+		    return e;
+		}	
+	  } else {
+		// failed cert Subject CN user check - set Unauthorized error  
+	    var e = new Error('Unauthorized: Client certificate Subject Common Name value not authorized for VLER Gateway requests!');
+	    e.status = 401;
+	    return e;
+	  }	  
+	} else {
+		logger.trace("request received has no SSL/TLS encryption..."); 
+		// only return this response if there is no HMAC encryption enabled, since HMAC works without encryption
+		if(!config.useHMACAuth) {
+			// connected without SSL/TLS encryption - return 403 response
+			logger.trace('Requestor certificate required for authorization, but 2-way SSL/TLS encryption not enabled for request!');
+	        var e = new Error('Forbidden: Requestor certificate required for authorization, but 2-way SSL/TLS encryption not enabled for request!');
+		    e.status = 403;
+		    return e;
+		}
+	}   
 };
 
-var validateCredentials = function (requestAccessKeyId) {
-	logger.trace("Checking if user is authorized, with Access Id: " + requestAccessKeyId);    
-    var authenticatedUser = config.accessControl[requestAccessKeyId];
-    logger.trace("Checking authenticated user configuration, where user: " + authenticatedUser);    
-    return authenticatedUser !== null && isAuthorized(authenticatedUser) ? authenticatedUser : null;
-};
+var authorizeHMAC = function (req) {
+	logger.trace("Checking HMAC authorization for requestor, method, and URL path..."); 
+	// if HMAC signature is valid and requestor is allowed, and is allowed to use the request method and URL path...
+	// Note: this is ugly, but this was the best way to use Ofuda, and also pass in the 'req' object for use
+    if (!ofuda.validateHttpRequest(req, function validateCredentials(requestAccessKeyId) {
+        	var isAuth = false;
+        	logger.trace("Checking if user is authorized with HMAC, with given Access Id: " + requestAccessKeyId);    
+            var authenticatedUser = config.useHMACAuth[requestAccessKeyId];            
+            //logger.trace("Checking HMAC authenticated user configuration, where user found is: " + JSON.stringify(authenticatedUser));
+            if (authenticatedUser && (authenticatedUser.allowMethods === "*" || S(authenticatedUser.allowMethods).contains(req.method))) {
+            	logger.trace("user found and requestor authorized by HMAC for method");
+            	// test for allowed route
+    			if (!_.isUndefined(req.parsedUrl.pathname) && req.parsedUrl.pathname!=='/') {
+    				// have a path
+    				logger.trace("attempting to authorize requestor to route by request path:", req.parsedUrl.pathname);
+    				// loop the allowRoutes array to find a match for the given request path
+    				var i;
+			        for (i = 0; i < authenticatedUser.allowRoutes.length; i++) {
+			        	if (S(req.parsedUrl.pathname).contains(authenticatedUser.allowRoutes[i])) {
+			        		// have a path match! - client is authorized
+			        		logger.trace("requestor authorized by HMAC for a request");
+			        		isAuth = true;
+			        		// stop looping
+			        		break;
+			        	}		        	
+			        }	   
+    			} else {
+    				// no pathname in request - so allow request for auth. user, do nothing
+    				// Note: this allows the 404 response to be returned
+    				logger.trace("requestor authorized by HMAC for a request without a path");
+    				isAuth = true;
+    			}	            	     			        		
+        	}
+        	return isAuth ? authenticatedUser : null;	            
+    	})
+    ) 
+    {
+    	// HMAC authorization for request failed
+    	var e = new Error('Unauthorized: HMAC authorization for request failed!');
+	    e.status = 401;	    
+	    return e;
+    } else {
+    	// HMAC authorization for request succeeded
+    	return null;
+    }
+}
 
 // define routing 'handler' function to handle gateway request processing
 var handler = function (req, res) {
-	logger.trace("Received gateway request, where gateway request has method: "+req.method+", and URL: "+req.url);
-
-    if (config.accessControl) {
-    	logger.trace("Checking Authorization for requestor, method, and URL path...");    
-        if (!ofuda.validateHttpRequest(req, validateCredentials)) {  
-        	logger.trace('Requestor not authorized');
-            logger.trace('Returning 401/Not Authorized gateway response');
-            res.writeHead(401)
-            res.end('Authorization failed!');
-        }
+	logger.info("Received gateway request, where gateway request has method: "+req.method+", host: "+req.headers.host+", and URL: "+req.url);
+		
+	// set the request transaction id as a UUID and set into req
+    req.transactionId = uuid.v4();
+    
+    // use the request transaction ID to set the temp file 'path' for buffering if needed 
+    var path = Path.join(getTempDir(), req.transactionId);
+    
+    // parse the request URL and place the parsed elements into req   
+    if (req.headers && req.headers.host) {    	
+    	// put the protocol and hostname into parsed url
+    	var protocol;
+	    if(req.connection.encrypted) {
+	    	protocol = "https://";
+	    } else {
+	    	protocol = "http://";
+	    }
+	    req.parsedUrl = url.parse(protocol + req.headers.host + req.url, true);
+    } else {
+    	// no host header, so do without
+    	req.parsedUrl = url.parse(req.url, true);
     }
+	logger.trace("Parsed gateway request URL:", req.parsedUrl); 
+	
+	var isRequestorAuthorized = false;
+	// attempt authorization using 2-way SSL/TLS client certificate Subject Common Name value
+	var authErr;
+	if(config.useClientCertAuth) {
+		logger.trace("Checking client SSL/TLS certificate authorization for requestor, method, and URL path..."); 		
+    	// use 2-way SSL/TLS Client Certificate Received Authentication/Authorization
+    	// - NOTE: SSL/TLS encryption must be present for the req, and a valid client cert received and validated at the Transport level already
+		authErr = authorizeClientCertSubject(req);
+		if(!authErr) {			
+			// is authorized - flag true and do nothing! 				
+			isRequestorAuthorized = true;
+		} else {
+			// if authErr.status is 403 and no SSL on request and config.useHMACAuth is enabled, mark isRequestorAuthorized as false and remove authErr
+			if (!req.connection.encrypted && authErr.status == "403" && config.useHMACAuth) {
+				isRequestorAuthorized = false;
+				authErr = null;
+			}
+		}
+		logger.trace("isRequestorAuthorized from 2-way client cert:",isRequestorAuthorized);
+    }	
+	
+	// if needed, attempt authorization using HMAC Authentication/Source Name Authorization
+	if (!isRequestorAuthorized && config.useHMACAuth) {
+    	logger.trace("Checking HMAC authorization for requestor, method, and URL path..."); 
+    	authErr = authorizeHMAC(req);
+    	if(!authErr) {
+			// is authorized - flag true and do nothing! 				
+			isRequestorAuthorized = true;
+		}
+    	logger.trace("isRequestorAuthorized from HMAC:",isRequestorAuthorized);
+    } 	
+	
+	// if either authorization enabled, and an error exists 
+	if((config.useClientCertAuth || config.useHMACAuth) && authErr) {	
+		// output authorization error gateway response
+	    logger.trace('Authentication failed:',authErr.message);
+        logger.trace('Returning statusCode='+authErr.status+' error gateway response');
+        res.writeHead(authErr.status, {
+            'Content-Type' : 'text/plain'
+        });
+        if(authErr.status=="500") {
+        	res.end('HTTP 1.1 500/Internal Server Error');
+        } else if(authErr.status=="403") {
+        	res.end('HTTP 1.1 403/Forbidden');
+        } else {
+        	res.end('HTTP 1.1 401/Not Authorized');
+        }
+        return;		
+	}
 
     // ignore favicon request
     if (req.url === '/favicon.ico') {
@@ -101,11 +294,7 @@ var handler = function (req, res) {
         return;
     }
 
-    //var path = req.url.replace(/\/([^\/]*)\/?.*$/g, "$1");
-    req.transactionId = uuid.v4();
-    var path = Path.join(getTempDir(), req.transactionId);
-    req.parsedUrl = url.parse(req.url, true);
-	logger.trace("Parsed gateway request URL:", req.parsedUrl); 
+    // if not a ping request or a path-less request
     if (!_.isUndefined(req.parsedUrl.pathname) && !(S(req.parsedUrl.path).contains('ping') || S(req.parsedUrl.path).contains('PING'))) {
 		logger.trace("Attempting to route gateway request..."); 
 		// loop through configure routes in config file, and process proxy request if a match is made to the given gateway request path
@@ -132,7 +321,7 @@ var handler = function (req, res) {
                         path: req.parsedUrl.path,
                         method: req.method,
                         headers: req.headers,
-                    }
+                    };
 
                     // define proxy_client and begin proxy http(s) request (asynchronous)
                     // Note: proxy_client will be an instance of type http.ClientRequest
@@ -161,9 +350,11 @@ var handler = function (req, res) {
                         	// Note: called once a socket is assigned to this request and is connected
                             proxy_client.setTimeout(route.timeout, function () {
 								// Note: if streaming to client has started, this writeHead call will have no effect.
-                            	logger.trace('Experienced a proxy request time-out to route: '+route.host+':'+route.port+''+req.parsedUrl.path+', returning 504/Gateway Timeout gateway response');                            	  
-                                res.writeHead(504, 'Gateway Timeout');
-                                res.end('The gateway experienced a proxy request time-out.');
+                            	logger.trace('gateway experienced a proxy request time-out to route: '+route.host+':'+route.port+''+req.parsedUrl.path+', returning 504/Gateway Timeout gateway response');                            	  
+                                res.writeHead(504, 'Gateway Timeout',{
+                                    'Content-Type' : 'text/plain'
+                                });
+                                res.end('HTTP 1.1 504/Gateway Timeout');
                                 socket.destroy();                                
                             });
                         }
@@ -173,20 +364,33 @@ var handler = function (req, res) {
                     // - emitted if there was an error writing or piping data for the stream.writable operations?
                     proxy_client.on('error', function (err) {
                     	if (res.headersSent) {
-                    		// assume response was already sent elsewhere
-                    		//logger.trace('already returned a gateway response');                        
+                    		// assume response was already sent elsewhere, e.g. Gateway Timeout
+                    		logger.trace('error event: but already returned a gateway response');                        
                     	} else {
-                    		logger.error('proxy client request error event emitted!, where error: '+err);
-                            // Note: if streaming to proxy client has started then writeHead call will have no effect.
-                        	// return default error gateway response                     		
-                    		res.writeHead(500, 'Internal Server Error');
-                    		res.write('There was a communication error with upstream server.');
-                    		res.end();
+                    		logger.error('proxy client request error event emitted!, where error: '+err.stack);
+                    		if (S(err.message).contains('ECONNREFUSED')) {
+                    			// return 503 Service Unavailable, since proxy client is most likely unable to connect to route's host                    			
+                    			res.writeHead(503, 'Service Unavailable',{
+                                    'Content-Type' : 'text/plain'
+                                });
+	                    		res.write('There was a communication error with upstream server.');
+	                    		res.end('HTTP 1.1 503/Service Unavailable');                 		
+                    		} else {                    		
+	                            // Note: if streaming to proxy client has started then writeHead call will have no effect.
+	                        	// return default error gateway response                     		
+	                    		res.writeHead(500, 'Internal Server Error', {
+	                                'Content-Type' : 'text/plain'
+	                            });
+	                    		res.write('There was a communication error with upstream server.');
+	                    		res.end('HTTP 1.1 500/Internal Server Error');
+                    		}
                     	}
                         // audit the gateway response to the proxy request error:
                     	// perform gateway request, gateway response, proxy error response structured audit logging if config set
                         if (route.audit && route.audit.structured && route.audit.structured.auditRequestResponse) {
                         	logger.trace('Auditing gateway request and response (and proxy client\'s request error)');
+                        	logger.trace('res.statusCode:',res.statusCode);
+                        	logger.trace("res.headers:",res.headers);
                             audit(route.audit.structured.options, req, res, '', err, function(auditRes) {});
                         }
                         // if file buffering set for this configured route                                         
@@ -217,7 +421,7 @@ var handler = function (req, res) {
                         var responseAttachmentAudit;
                         var isResAuditInitialized = false;
 
-                        // get the file size from the http 'Content-Length' received in proxy client response
+                        // get the file size from the http 'Content-Length' header received in proxy client response
                         var uploadedSize = 0;
                         var fileSizeStr = proxyRes.headers['content-length'];
                         var fileSize = 0;
@@ -313,8 +517,10 @@ var handler = function (req, res) {
                                 if (fileSize != uploadedSize) {
                                 	// return an error gateway response, set errState to true
                                 	logger.error('HTTP Header Content-Length does not match received file size, Content-Length:' + fileSize + ' bytes; Uploaded Size: ' + uploadedSize + ' bytes');
-                                    res.writeHead(500, 'HTTP Header Content-Length does not match received file size, Content-Length:' + fileSize + ' bytes; Uploaded Size: ' + uploadedSize + ' bytes');
-                                    res.end('HTTP Header Content-Length value does not match received file size.');
+                                    res.writeHead(500, 'HTTP Header Content-Length does not match received file size, Content-Length:' + fileSize + ' bytes; Uploaded Size: ' + uploadedSize + ' bytes', {
+                                        'Content-Type' : 'text/plain'
+                                    });
+                                    res.end('HTTP 1.1 500/Internal Server Error: HTTP Header Content-Length value does not match received file size.');
                                     errState = true;
                                 }
                             }
@@ -351,9 +557,10 @@ var handler = function (req, res) {
                         proxyRes.on('error', function (e) {
                             logger.error('Error emitted from proxy client request attempt, where error: ', e);
 							logger.trace('Returning 500/Internal Server Error gateway response due to proxy client error');
-							// TODO: Should this error information be returned in the gateway response?
-                            res.writeHead(500, e);
-                            res.end('Internal Server Error Occured');
+							res.writeHead(500, 'Internal Server Error', {
+                                'Content-Type' : 'text/plain'
+                            });
+                            res.end('HTTP 1.1 500/Internal Server Error');
                             // stop unstructured audit logging of proxy response attachment received if occurring 
                             if (isResAuditInitialized && !_.isUndefined(responseAttachmentAudit)) {
                                 logger.trace('End response chunk write to Audit, where error: ' + e);                                
@@ -371,7 +578,7 @@ var handler = function (req, res) {
                             	// release the tmp file in the tmp directory
                             	fs.unlink(path, function (err) { 
                                     if(err) {
-                                    	logger.error('Could not unlink file:' + path + ", where error: ",err);
+                                    	logger.error('Could not unlink file:' + path + ', where error: ',err);
                                     }
                                 });
                             }
@@ -445,8 +652,10 @@ var handler = function (req, res) {
                         proxy_client.end();
                         // return an error gateway response
                         logger.trace('Returning 500/Internal Server Error gateway response, due to gateway request data processing error Event');
-                        res.writeHead(500, 'Internal Server Error');
-                        res.end('Internal Server Error');   
+                        res.writeHead(500, 'Internal Server Error', {
+                            'Content-Type' : 'text/plain'
+                        });
+                        res.end('HTTP 1.1 500/Internal Server Error');   
                     });
                     // have matched the request path to a configured route, so exit the 'for' loop
                     break;
@@ -456,8 +665,11 @@ var handler = function (req, res) {
         // handle 'no matching configured route found' case
         if (i === config.routes.length) {
 			logger.trace('No matching configured route found for gateway request path!: Returning 404/Not Found gateway response');
-            res.writeHead(404, 'Not Found');
-            res.end('Not Found');
+            res.writeHead(404, 'Not Found', {
+                'Content-Type' : 'text/plain'
+            });
+            res.end('HTTP 1.1 404/Not Found');
+            return;
         } 
     } else if (S(req.parsedUrl.path).contains('ping') || S(req.parsedUrl.path).contains('PING')) {
 		// return the "PONG" response to a ping request
@@ -473,10 +685,10 @@ var handler = function (req, res) {
         res.end();
         return;
     } else {
-		// return a 404 response to an missing or unknown path request
+		// return a 404 response to a "no path" request
     	logger.trace('Returning 404/Not Found gateway response, due to receipt of unrecognized type of gateway request');
         res.writeHead(404, 'Not Found');
-        res.end('Not Found');
+        res.end('HTTP 1.1 404/Not Found');
         return;
     }
 };
@@ -666,10 +878,17 @@ function audit(options, req, res, proxyRes, err, callback) {
             logger.error('Error with audit, where error: ', e);
         });
     });
-
+        
     req = req ? req : {};
-    res = res ? res : {};
+    res = res ? res : {};    
     proxyRes = proxyRes ? proxyRes : {};
+    
+    // normalize the err into JSON to avoid cyclical 
+    // JSON object conversion errors and ecrud audit storage errors
+    error = {};
+    error.errno = err.errno;
+    error.message = err.message;
+    error.stack = err.stack;
 
     var audit = {};
     audit.transactionId = req.transactionId;
@@ -684,16 +903,20 @@ function audit(options, req, res, proxyRes, err, callback) {
     audit.req.key = req.key;
 
     audit.res = {};
-    audit.res.headers = res.headers;
+    if(!res.headers) {
+    	audit.res.headers = res._headers;
+    } else {
+    	audit.res.headers = res.headers;
+    }    
     audit.res.statusCode = res.statusCode;
     audit.res.key = res.key;
-    audit.res.err = err;
+    
+    audit.res.err = error;
 
     audit.proxyRes = {};
     audit.proxyRes.headers = proxyRes.headers;
-    audit.res.statusCode = proxyRes.statusCode;
-
-
+    audit.proxyRes.statusCode = proxyRes.statusCode;
+    
     var auditStr = JSON.stringify(audit);
     logger.trace("Auditing: " + auditStr); 
     auditService.write(auditStr, 'binary');
