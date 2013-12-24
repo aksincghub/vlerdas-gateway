@@ -315,11 +315,8 @@ var handler = function (req, res) {
                     if(config.routes[i].options.length > 0) {
                     	// have more than one hostname, port route configured for this route path - do round-robin load-balancing 
                     	// by shifting the config.routes[i].options array for this route path
-                    	logger.trace("original config.routes[i].options:",config.routes[i].options);
-                    	var route = config.routes[i].options.shift();  
-                    	logger.trace("shifted, current route:",route);
+                    	var route = config.routes[i].options.shift();                      	
                     	config.routes[i].options.push(route);
-                    	logger.trace("reset config.routes[i].options:",config.routes[i].options);
                     } else {
                     	// have only one hostname, port configured for this route path - use the one route
                     	route = config.routes[i].options[0];
