@@ -310,9 +310,20 @@ var handler = function (req, res) {
                         throw new Error("Route's \'options\' has to be defined in configuration file!");
                     }
                     
-					// do random routing - set a route only for multiple host/port routes set - in lieu of actual load-balancing
-                    var len = Math.floor(Math.random() * config.routes[i].options.length);
-                    var route = config.routes[i].options.length > 0 ? config.routes[i].options[len] : config.routes[i].options[0];
+                    // handle load-balancing if needed
+                    var route;
+                    if(config.routes[i].options.length > 0) {
+                    	// have more than one hostname, port route configured for this route path - do round-robin load-balancing 
+                    	// by shifting the config.routes[i].options array for this route path
+                    	logger.trace("original config.routes[i].options:",config.routes[i].options);
+                    	var route = config.routes[i].options.shift();  
+                    	logger.trace("shifted, current route:",route);
+                    	config.routes[i].options.push(route);
+                    	logger.trace("reset config.routes[i].options:",config.routes[i].options);
+                    } else {
+                    	// have only one hostname, port configured for this route path - use the one route
+                    	route = config.routes[i].options[0];
+                    }
 
                     // set the proxy client request options from config file for this route for proxy_client request call
                     var options = {
@@ -347,7 +358,8 @@ var handler = function (req, res) {
                         	logger.trace("setting route.timeout to: "+route.timeout);
                         	// set the explicitly defined timeout, and return a 504 response if the timeout occurs, 
                         	// and release the socket from this request
-                        	// Note: called once a socket is assigned to this request and is connected
+                        	// Note: called once a socket is assigned to this request and is connected, 
+                        	// and no activity occurs on socket for the timeout length
                             proxy_client.setTimeout(route.timeout, function () {
 								// Note: if streaming to client has started, this writeHead call will have no effect.
                             	logger.trace('gateway experienced a proxy request time-out to route: '+route.host+':'+route.port+''+req.parsedUrl.path+', returning 504/Gateway Timeout gateway response');                            	  
@@ -361,7 +373,11 @@ var handler = function (req, res) {
                     });
 
                     // handle error event experienced when processing proxy client request 
-                    // - emitted if there was an error writing or piping data for the stream.writable operations?
+                    // - emitted if there was an error connecting to the remote endpoint, 
+                    // or while writing or piping data for the stream.writable operations 
+                    // for a request body in a POST/PUT request, 
+                    // or after a proxy client socket timeout event (above) has occurred,
+                    // or?                    
                     proxy_client.on('error', function (err) {
                     	if (res.headersSent) {
                     		// assume response was already sent elsewhere, e.g. Gateway Timeout
