@@ -1,7 +1,7 @@
 {
   "name": "vgateway",
   "version": "0.2.0",
-  "description": "VLER Node.js Gateway",
+  "description": "VA VLER Node.js Gateway",
   "keywords": [
     "http",
     "https",

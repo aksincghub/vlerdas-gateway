@@ -18,23 +18,37 @@
             }
         }
     },
-    "accessControl.DISABLED" : {
+    "useClientCertAuth.DISABLED" : {
+    	"das.dynalias.org" : {
+            "name" : "JulianJewel",            
+            "allowMethods" : "GET, POST",
+            "allowRoutes" : ["/ping","/lens/v1","/ecrud/v1/core"]
+        },
+        "www.shmoedomain.com" : {
+            "name" : "JoeShmoe",            
+            "allowMethods" : "GET",
+            "allowRoutes" : ["/ping","/lens/v1"]
+        }
+    },
+    "useHMACAuth.DISABLED" : {
         "testuser1" : {
             "accessKeyId" : "testuser1",
             "accessKeySecret" : "pa$$w0rd1",
-            "allowMethods" : "*"
+            "allowMethods" : "*",
+            "allowRoutes" : ["/ping","/lens/v1","/ecrud/v1/core"]
         },
         "testuser2" : {
             "accessKeyId" : "testuser2",
             "accessKeySecret" : "pa$$w0rd2",
-            "allowMethods" : "POST"
+            "allowMethods" : "POST",
+            "allowRoutes" : ["/ping","/lens/v1"]
         }
-    },
+    },    
     "ofuda" : {
         "headerPrefix" : "Amz",
         "hash" : "sha1",
-        "serviceLabel" : "AWS",
-        "debug" : false
+        "serviceLabel" : "VLER",
+        "debug" : true
     },
     "routes" :
     [{
@@ -104,18 +118,6 @@
                             "auditResponse" : true
                         }
                     }
-                }
-            ]
-        }, {
-            "path" : "/pdfs",
-            "options" : [{
-                    "host" : "www.avo.alaska.edu",
-                    "port" : "443",
-					"https" : {
-						"rejectUnauthorized" : false
-					},
-                    "timeout" : 120000,
-					"buffer": true
                 }
             ]
         }
